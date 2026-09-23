@@ -13,6 +13,7 @@ from trailforge.domain.enums import AuditAction
 from trailforge.errors import IdempotencyConflictError
 from trailforge.models.audit import AuditLog, IdempotencyRecord
 from trailforge.repositories.audit import IdempotencyRepository
+from trailforge.services.sealing import AuditChainSealer
 
 SENSITIVE_FIELDS = {
     "password",
@@ -52,6 +53,9 @@ class ServiceBase:
         )
         self.session.add(log)
         self.session.flush()
+        # Seal the record into the object's hash chain inside the same
+        # transaction: a rolled-back business write leaves no orphan link.
+        AuditChainSealer(self.session).seal(log)
         return log
 
     def snapshot(self, entity: object, *fields: str) -> dict[str, Any]:

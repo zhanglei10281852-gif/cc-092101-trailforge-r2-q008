@@ -28,6 +28,43 @@ class AuditLog(IntegerPrimaryKeyMixin, Base):
     correlation_id: Mapped[str | None] = mapped_column(String(120), index=True)
 
 
+class AuditChainLink(IntegerPrimaryKeyMixin, Base):
+    """One tamper-evident chain link sealing exactly one audit log row.
+
+    Links form one continuous hash chain per business object
+    (entity_type, entity_id): ``sequence`` starts at 1 and grows by one,
+    ``previous_hash`` points at the predecessor's ``entry_hash``. The unique
+    constraint on (entity_type, entity_id, sequence) makes concurrent
+    appends fail instead of forking the chain; the failed transaction rolls
+    back, so a rolled-back business write never leaves an orphan link.
+    """
+
+    __tablename__ = "audit_chain_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type",
+            "entity_id",
+            "sequence",
+            name="uq_audit_chain_object_sequence",
+        ),
+        UniqueConstraint("audit_log_id", name="uq_audit_chain_log"),
+        Index("ix_audit_chain_object_time", "entity_type", "entity_id", "occurred_at"),
+    )
+
+    audit_log_id: Mapped[int] = mapped_column(
+        ForeignKey("audit_logs.id", ondelete="RESTRICT"), nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(40), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now, nullable=False)
+
+
 class IdempotencyRecord(IntegerPrimaryKeyMixin, Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (

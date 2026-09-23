@@ -11,6 +11,7 @@ from trailforge.database.migrations import (
     migration_status,
 )
 from trailforge.database.session import Database
+from trailforge.services.sealing import backfill_audit_chain
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-db", help="create the SQLite schema and apply migrations")
     subparsers.add_parser("migration-status", help="show applied and pending migrations")
     subparsers.add_parser("check-db", help="run SQLite integrity and foreign-key checks")
+    seal = subparsers.add_parser(
+        "seal-audit-chain",
+        help="seal existing audit logs into per-object hash chains (resumable)",
+    )
+    seal.add_argument("--batch-size", type=int, default=500, help="logs sealed per commit")
     reset = subparsers.add_parser("reset-db", help="delete and recreate the local SQLite database")
     reset.add_argument("--confirm", action="store_true", help="confirm destructive local reset")
     return parser
@@ -39,6 +45,12 @@ def main() -> int:
         result = assert_database_integrity(database)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["healthy"] else 1
+    if args.command == "seal-audit-chain":
+        if args.batch_size < 1:
+            raise SystemExit("batch size must be at least 1")
+        result = backfill_audit_chain(database, batch_size=args.batch_size)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if args.command == "reset-db":
         if not args.confirm:
             parser = build_parser()

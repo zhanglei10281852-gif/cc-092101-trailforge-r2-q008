@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 
 from sqlalchemy import Engine, event
 from sqlalchemy import create_engine as sqlalchemy_create_engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -101,7 +101,20 @@ class Database:
                     raise
                 delay = self.settings.sqlite_busy_backoff_seconds * (2**attempt)
                 time.sleep(delay)
+            except IntegrityError as exc:
+                # Concurrent appends to the same object's audit chain race on
+                # the (entity_type, entity_id, sequence) unique constraint.
+                # The losing transaction rolled back cleanly, so re-running
+                # the operation extends the chain instead of forking it.
+                if not self._is_chain_race(exc) or attempt == attempts - 1:
+                    raise
+                delay = self.settings.sqlite_busy_backoff_seconds * (2**attempt)
+                time.sleep(delay)
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _is_chain_race(exc: IntegrityError) -> bool:
+        return "audit_chain_links" in str(exc)
 
     @staticmethod
     def _is_busy(exc: OperationalError) -> bool:

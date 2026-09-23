@@ -9,10 +9,17 @@ from sqlalchemy.orm import Session
 from trailforge.api.dependencies import get_session
 from trailforge.repositories.audit import AuditRepository
 from trailforge.schemas.activities import ActivityStatistics
-from trailforge.schemas.audit import AuditFilter, AuditLogResponse, DashboardStatistics
+from trailforge.schemas.audit import (
+    AuditFilter,
+    AuditLogResponse,
+    ChainBreakResponse,
+    ChainVerificationResponse,
+    DashboardStatistics,
+)
 from trailforge.schemas.common import Page
 from trailforge.schemas.gear import GearStatistics
 from trailforge.schemas.safety import RiskStatistics
+from trailforge.services.sealing import AuditChainVerifier
 from trailforge.services.statistics import StatisticsService
 
 router = APIRouter(tags=["statistics", "audit"])
@@ -83,4 +90,42 @@ def list_audit_logs(
         page=result.page,
         page_size=result.page_size,
         total=result.total,
+    )
+
+
+@router.get("/audit-chain/verify", response_model=ChainVerificationResponse)
+def verify_audit_chain(
+    session: SessionDep,
+    entity_type: str = Query(min_length=1, max_length=80),
+    entity_id: int = Query(gt=0),
+    occurred_after: datetime | None = None,
+    occurred_before: datetime | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> ChainVerificationResponse:
+    report = AuditChainVerifier(session).verify(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
+        page=page,
+        page_size=page_size,
+    )
+    first_break = (
+        ChainBreakResponse(**report.first_break.__dict__)
+        if report.first_break is not None
+        else None
+    )
+    return ChainVerificationResponse(
+        entity_type=report.entity_type,
+        entity_id=report.entity_id,
+        status=report.status,
+        checked_links=report.checked_links,
+        total_links=report.total_links,
+        unsealed_logs=report.unsealed_logs,
+        algorithms=list(report.algorithms),
+        page=report.page,
+        page_size=report.page_size,
+        pages=report.pages,
+        first_break=first_break,
     )

@@ -36,6 +36,31 @@ class AuditFilter(BaseModel):
     direction: str = Field(default="desc", pattern="^(asc|desc)$")
 
 
+class ChainBreakResponse(BaseModel):
+    """First detected chain break. Digests only — never record content."""
+
+    reason: str
+    link_id: int | None = None
+    audit_log_id: int | None = None
+    sequence: int | None = None
+    expected_hash: str | None = None
+    actual_hash: str | None = None
+
+
+class ChainVerificationResponse(BaseModel):
+    entity_type: str
+    entity_id: int
+    status: str
+    checked_links: int
+    total_links: int
+    unsealed_logs: int
+    algorithms: list[str]
+    page: int
+    page_size: int
+    pages: int
+    first_break: ChainBreakResponse | None = None
+
+
 class DashboardStatistics(BaseModel):
     generated_at: datetime
     active_users: int

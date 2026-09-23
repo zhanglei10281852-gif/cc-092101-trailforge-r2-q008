@@ -156,3 +156,22 @@ python -m trailforge.cli check-db
 每个 HTTP 请求使用独立 SQLAlchemy Session，成功时统一提交，异常时统一回滚。外键约束在每条 SQLite 连接上开启；文件数据库使用 WAL 和 busy timeout。可重试的后台写操作可使用 `Database.run_write`，它只对 SQLite busy/locked 错误做有界指数退避，不会吞掉业务冲突。
 
 训练计划、训练记录、活动、报名、装备借还、风险和签到等关键变更都会写结构化审计日志。日志包含操作者、UTC 时间、对象、动作、前后状态和必要上下文；审计工具会过滤密码、令牌、密钥等敏感字段。
+
+## 审计链封存与核验
+
+每条审计日志在写入的同一事务内被封装进按业务对象（`entity_type` + `entity_id`）划分的哈希链：链节点保存稳定字段序列化的内容摘要、前序节点摘要和自身摘要，并带有算法版本标识（当前为 `sha256-chain-v1`）。业务事务回滚时链节点随之回滚，不会留下孤立节点；同一对象的并发写入依靠 `(entity_type, entity_id, sequence)` 唯一约束串行成唯一连续链，冲突的写操作会整体重试。摘要只覆盖已脱敏的存储内容，敏感字段不会进入链计算。
+
+升级前已存在的审计日志可一次性回填，按确定顺序（发生时间、主键）分批提交，中断后重新执行即可安全续跑：
+
+```bash
+python -m trailforge.cli seal-audit-chain --batch-size 500
+```
+
+内审可按对象和时间范围分页核验链条，接口只返回首个断点（缺行、前序摘要缺失或摘要不匹配）及摘要值，不暴露审计内容：
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/audit-chain/verify?entity_type=expedition&entity_id=1&page=1&page_size=100"
+```
+
+`status` 为 `ok` 表示链完整，`failed` 时 `first_break.reason` 给出 `payload_mismatch`（内容被改写）、`sequence_gap`（缺行）、`previous_hash_mismatch`（前序摘要缺失或被改）、`entry_mismatch`、`orphan_link`、`unsealed_log`（未封存的记录）或 `unknown_algorithm`（未知的链算法版本）。
+
