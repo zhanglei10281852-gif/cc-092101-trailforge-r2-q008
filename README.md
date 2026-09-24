@@ -114,13 +114,14 @@ curl -sS -X POST 'http://127.0.0.1:8000/api/v1/routes?actor_id=1' \
 ```text
 trailforge/
   api/             FastAPI 路由和依赖
+  audit_chain/     审计链摘要算法、封存、回填和核验
   database/        SQLite 连接、事务、迁移和 UTC 类型
   domain/          枚举与状态转换规则
   models/          SQLAlchemy 2.x 数据模型和数据库约束
   repositories/    查询、分页、筛选和持久化读取
   schemas/         Pydantic 请求、响应和组合校验
   services/        业务事务、状态机、幂等、审计和统计
-  cli.py           初始化、状态、完整性检查和安全重建命令
+  cli.py           初始化、状态、完整性检查、审计链回填/核验和安全重建命令
   main.py          应用工厂和统一错误响应
 tests/             单元、事务、并发和 API 集成测试
 tools/             本地验证工具
@@ -156,3 +157,13 @@ python -m trailforge.cli check-db
 每个 HTTP 请求使用独立 SQLAlchemy Session，成功时统一提交，异常时统一回滚。外键约束在每条 SQLite 连接上开启；文件数据库使用 WAL 和 busy timeout。可重试的后台写操作可使用 `Database.run_write`，它只对 SQLite busy/locked 错误做有界指数退避，不会吞掉业务冲突。
 
 训练计划、训练记录、活动、报名、装备借还、风险和签到等关键变更都会写结构化审计日志。日志包含操作者、UTC 时间、对象、动作、前后状态和必要上下文；审计工具会过滤密码、令牌、密钥等敏感字段。
+
+## 审计链防篡改封存
+
+每条审计日志在写入的同一事务内被"封存"进所属业务对象（`entity_type:entity_id`）的哈希链：记录保存链算法版本（当前为 `v1`）、链内序号、前序摘要和自身摘要。摘要覆盖操作者、时间、对象、动作、前后状态与上下文等稳定字段，计算时使用的是已按现有脱敏边界处理后的存储内容，因此封存与核验都不会接触未脱敏数据。
+
+- 同一对象的并发写入通过链头行（`audit_chain_heads`）串行化，形成唯一、无空洞的连续序号；链节点与业务事务同生共死，回滚不会留下孤立节点。
+- 核验只依赖本地数据库，可按对象和时间范围调用 `GET /api/v1/audit/chains/verify`（支持 `limit_chains`/`offset_chains` 分页），返回首个断点（缺序号、前序摘要不匹配、自身摘要不匹配、链头不一致、未封存记录、未知算法版本），响应只含结构性坐标，不包含记录内容或摘要值。
+- 存量记录用 `python -m trailforge.cli backfill-audit-chains` 或 `POST /api/v1/audit/chains/backfill` 按确定顺序（链键升序、链内按发生时间与 ID）分批回填；每批一个事务，中断后重跑自动从剩余未封存记录继续。
+- 命令行核验：`python -m trailforge.cli verify-audit-chains [--entity-type T --entity-id N]`，发现断点时退出码为 1。
+- 数据库文件被复制后，对副本的删行、改内容、截断链尾、重排序号等篡改都会被核验发现；链算法带版本标识，未来升级不影响旧链核验。

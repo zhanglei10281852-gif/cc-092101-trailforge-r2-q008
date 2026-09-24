@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-from trailforge.api import activities, gear, routes, safety, statistics, training, users
+from trailforge.api import activities, audit, gear, routes, safety, statistics, training, users
 
 api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(audit.router)
 api_router.include_router(users.router)
 api_router.include_router(training.router)
 api_router.include_router(routes.router)

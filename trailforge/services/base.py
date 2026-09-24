@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
+from trailforge.audit_chain.service import AuditChainService
 from trailforge.domain.enums import AuditAction
 from trailforge.errors import IdempotencyConflictError
 from trailforge.models.audit import AuditLog, IdempotencyRecord
@@ -52,6 +53,10 @@ class ServiceBase:
         )
         self.session.add(log)
         self.session.flush()
+        # Seal the row into the object's chain in the same transaction. If the
+        # surrounding business transaction rolls back, the node and the head
+        # update roll back together, leaving no orphan chain node.
+        AuditChainService(self.session).seal_new(log)
         return log
 
     def snapshot(self, entity: object, *fields: str) -> dict[str, Any]:

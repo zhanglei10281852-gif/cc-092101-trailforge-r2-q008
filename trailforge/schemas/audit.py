@@ -48,3 +48,38 @@ class DashboardStatistics(BaseModel):
     overdue_check_ins: int
     open_emergencies: int
     active_gear_loans: int
+
+
+class AuditChainBreakResponse(BaseModel):
+    """Structural coordinates of a chain break only.
+
+    Never carries record content or stored digests, so masked data cannot be
+    inferred from a verification response.
+    """
+
+    kind: str
+    chain_key: str
+    entity_type: str
+    entity_id: int
+    expected_seq: int | None = None
+    actual_seq: int | None = None
+    audit_id: int | None = None
+    occurred_at: datetime | None = None
+    head_seq: int | None = None
+
+
+class AuditChainVerificationResponse(BaseModel):
+    ok: bool
+    chains_checked: int
+    total_chains: int
+    records_checked: int
+    checked_from: datetime | None = None
+    checked_to: datetime | None = None
+    first_break: AuditChainBreakResponse | None = None
+    breaks: list[AuditChainBreakResponse] = Field(default_factory=list)
+
+
+class AuditChainBackfillResponse(BaseModel):
+    batches: int
+    sealed: int
+    remaining: int
